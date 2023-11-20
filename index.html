@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Graph Visualizer</title>
+    <style>
+        #graphContainer {
+            width: 100%;
+            height: 100%;
+        }
+
+        .node {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+
+        .valuable {
+            fill: red;
+        }
+
+        .normal {
+            fill: blue;
+        }
+
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+        }
+
+        .police {
+            fill: green;
+        }
+
+        .thief {
+            fill: black;
+        }
+    </style>
+</head>
+<body>
+<input type="file" id="fileInput">
+<input type="file" id="animationInput">
+<div>
+    <input type="text" id="policeNodeId" placeholder="Police Node ID">
+    <input type="text" id="thiefNodeId" placeholder="Thief Node ID">
+    <button id="updateColors">Update Node Colors</button>
+</div>
+<button id="startAnimation">Start Animation</button>
+<div id="graphContainer"></div>
+
+<script src="https://d3js.org/d3.v5.min.js"></script>
+<script>
+    document.getElementById('fileInput').addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(fileEvent) {
+            const text = fileEvent.target.result;
+            const edges = parseEdges(text);
+            visualizeGraph(edges);
+        };
+        reader.readAsText(file);
+    });
+
+    let animationData = [];
+    let currentAnimationStep = 0;
+
+    document.getElementById('animationInput').addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(fileEvent) {
+            const text = fileEvent.target.result;
+            animationData = parseAnimationData(text);
+            currentAnimationStep = 0;
+        };
+        reader.readAsText(file);
+    });
+
+    function parseEdgeData(input) {
+        const pattern = /\((-?\d+), (-?\d+), (-?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?), List\(([^)]*)\), List\(([^)]*)\), List\(([^)]*)\), List\(([^)]*)\), (true|false), (true|false)\)\s*/;
+        const match = input.match(pattern);
+        if (match) {
+            const [
+                , srcId, dstId, weight,
+                propertiesSrc, propertiesDst,
+                childrenPropHashSrc, childrenPropHashDst,
+                valuableSrc, valuableDst
+            ] = match;
+
+            return {
+                srcId: parseInt(srcId),
+                dstId: parseInt(dstId),
+                weight: parseFloat(weight),
+                propertiesSrc: parseList(propertiesSrc),
+                propertiesDst: parseList(propertiesDst),
+                childrenPropHashSrc: parseList(childrenPropHashSrc),
+                childrenPropHashDst: parseList(childrenPropHashDst),
+                valuableSrc: valuableSrc === 'true',
+                valuableDst: valuableDst === 'true'
+            };
+        } else {
+            console.error("Invalid input format: " + input);
+            return null;
+        }
+    }
+
+    function parseList(listString) {
+        return listString.split(', ').map(Number).filter(n => !isNaN(n));
+    }
+
+    function parseEdges(text) {
+        const lines = text.split('\n');
+        return lines.map(line => parseEdgeData(line)).filter(edge => edge !== null);
+    }
+
+    function parseAnimationData(text) {
+        return text.split('\n').map(line => {
+            const parts = line.split(',').map(Number);
+            return { police: parts[0], thief: parts[1]  };
+        });
+    }
+
+    function updateOrCreateSVG() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        let svg = d3.select('#graphContainer').select('svg');
+        if (svg.empty()) {
+            svg = d3.select('#graphContainer').append('svg');
+        }
+
+        svg.attr('width', width)
+            .attr('height', height);
+
+        return svg;
+    }
+
+    function visualizeGraph(edges) {
+        const nodes = {};
+        edges.forEach(edge => {
+            if (!nodes[edge.srcId]) {
+                nodes[edge.srcId] = { id: edge.srcId, valuable: edge.valuableSrc };
+            }
+            if (!nodes[edge.dstId]) {
+                nodes[edge.dstId] = { id: edge.dstId, valuable: edge.valuableDst };
+            }
+        });
+
+        const svg = updateOrCreateSVG();
+
+        const simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id))
+            .force("charge", d3.forceManyBody())
+            .force("center", d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2));
+
+        const graphEdges = edges.map(edge => ({
+            source: edge.srcId,
+            target: edge.dstId
+        }));
+
+        const link = svg.append("g")
+            .attr("class", "links")
+            .selectAll("line")
+            .data(graphEdges)
+            .enter().append("line")
+            .attr("class", "link");
+
+        const node = svg.append("g")
+            .attr("class", "nodes")
+            .selectAll("circle")
+            .data(Object.values(nodes))
+            .enter().append("circle")
+            .attr("class", d => d.valuable ? "node valuable" : "node normal")
+            .attr("r", 5)
+            .call(d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended));
+
+        simulation
+            .nodes(Object.values(nodes))
+            .on("tick", ticked);
+
+        simulation.force("link")
+            .links(graphEdges);
+
+        document.getElementById('updateColors').addEventListener('click', function() {
+            const policeId = parseInt(document.getElementById('policeNodeId').value);
+            const thiefId = parseInt(document.getElementById('thiefNodeId').value);
+
+            d3.selectAll('circle')
+                .attr('class', function(d) {
+                    if (d.id === policeId) {
+                        return 'node police';
+                    } else if (d.id === thiefId) {
+                        return 'node thief';
+                    } else {
+                        return d.valuable ? 'node valuable' : 'node normal';
+                    }
+                }).attr('r', function(d) {
+                if (d.id === policeId || d.id === thiefId) {
+                    return 7; // Increase size for police and thief nodes
+                } else {
+                    return 5;
+                }
+            });
+        });
+
+        function ticked() {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            node
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y);
+        }
+
+        function animateGraph() {
+            console.log(animationData)
+            if (currentAnimationStep >= animationData.length) {
+                console.log("Animation completed");
+                return;
+            }
+
+            const stepData = animationData[currentAnimationStep];
+            currentAnimationStep++;
+
+            d3.selectAll('circle')
+                .attr('class', function(d) {
+                    if (d.id === stepData.police) {
+                        return 'node police';
+                    } else if (d.id === stepData.thief) {
+                        return 'node thief';
+                    } else {
+                        return d.valuable ? 'node valuable' : 'node normal';
+                    }
+                }).attr('r', function(d) {
+                if (d.id === stepData.police || d.id === stepData.thief) {
+                    return 7; // Increase size for police and thief nodes
+                } else {
+                    return 5;
+                }
+            });
+
+            if (currentAnimationStep < animationData.length) {
+                setTimeout(animateGraph, 1000);
+            }
+        }
+
+        document.getElementById('startAnimation').addEventListener('click', function() {
+            animateGraph();
+        });
+
+        function dragstarted(d) {
+            if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(d) {
+            d.fx = d3.event.x;
+            d.fy = d3.event.y;
+        }
+
+        function dragended(d) {
+            if (!d3.event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    }
+</script>
+</body>
+</html>
