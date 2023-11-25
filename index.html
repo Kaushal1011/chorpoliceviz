@@ -185,6 +185,38 @@
         simulation.force("link")
             .links(graphEdges);
 
+        const legendData = [
+        { color: 'red', text: 'Valuable' },
+        { color: 'blue', text: 'Normal' },
+        { color: 'green', text: 'Police' },
+        { color: 'black', text: 'Thief' }
+    ];
+
+        // Create the legend
+        const legend = svg.append('g')
+                          .attr('class', 'legend')
+                          .attr('transform', 'translate(20,20)'); // Position the legend
+    
+        const legendItems = legend.selectAll('.legend-item')
+                                  .data(legendData)
+                                  .enter()
+                                  .append('g')
+                                  .attr('class', 'legend-item')
+                                  .attr('transform', (d, i) => `translate(0, ${i * 20})`); // Position each legend item
+    
+        legendItems.append('circle') // Color circles
+                   .attr('r', 5)
+                   .attr('cx', 10)
+                   .attr('cy', 10)
+                   .style('fill', d => d.color);
+    
+        legendItems.append('text') // Text labels
+                   .attr('x', 25)
+                   .attr('y', 10)
+                   .attr('dy', '.35em')
+                   .style('text-anchor', 'start')
+                   .text(d => d.text);
+
         document.getElementById('updateColors').addEventListener('click', function() {
             const policeId = parseInt(document.getElementById('policeNodeId').value);
             const thiefId = parseInt(document.getElementById('thiefNodeId').value);
